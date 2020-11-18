@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use anyhow::ensure;
@@ -87,6 +88,13 @@ pub struct PrivateSector<'a, Tree: MerkleTreeTrait> {
     >,
     pub comm_c: <Tree::Hasher as Hasher>::Domain,
     pub comm_r_last: <Tree::Hasher as Hasher>::Domain,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProveParams {
+    pub sector_id: SectorId,
+    pub challenged_leaf_start: u64,
+    pub rows_to_discard: usize,
 }
 
 #[derive(Debug)]
@@ -313,6 +321,10 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
 
             let mut proofs = Vec::with_capacity(num_sectors_per_chunk);
 
+            let mut to_proofs = Vec::new();
+            let mut proofs_map = HashMap::new();
+            let mut priv_sector_map = HashMap::new();
+
             for (i, (pub_sector, priv_sector)) in pub_sectors_chunk
                 .iter()
                 .zip(priv_sectors_chunk.iter())
@@ -329,53 +341,66 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
                     Tree::Arity::to_usize(),
                 );
 
-                let mut inclusion_proofs = Vec::new();
-                for proof_or_fault in (0..pub_params.challenge_count)
-                    .into_par_iter()
-                    .map(|n| {
-                        let challenge_index = ((j * num_sectors_per_chunk + i)
-                            * pub_params.challenge_count
-                            + n) as u64;
-                        let challenged_leaf_start = generate_leaf_challenge(
-                            pub_params,
-                            pub_inputs.randomness,
-                            sector_id.into(),
-                            challenge_index,
-                        )?;
+                proofs_map.insert(sector_id, Vec::new());
+                priv_sector_map.insert(sector_id, priv_sector);
 
-                        let proof = tree.gen_cached_proof(
-                            challenged_leaf_start as usize,
-                            Some(rows_to_discard),
-                        );
-                        match proof {
-                            Ok(proof) => {
-                                if proof.validate(challenged_leaf_start as usize)
-                                    && proof.root() == priv_sector.comm_r_last
-                                {
-                                    Ok(ProofOrFault::Proof(proof))
-                                } else {
-                                    Ok(ProofOrFault::Fault(sector_id))
-                                }
-                            }
-                            Err(_) => Ok(ProofOrFault::Fault(sector_id)),
-                        }
-                    })
-                    .collect::<Result<Vec<_>>>()?
+                for k in 0..pub_params.challenge_count
                 {
-                    match proof_or_fault {
-                        ProofOrFault::Proof(proof) => {
-                            inclusion_proofs.push(proof);
+                    let challenge_index = ((j * num_sectors_per_chunk + i)
+                        * pub_params.challenge_count
+                        + k) as u64;
+                    let challenged_leaf_start = generate_leaf_challenge(
+                        pub_params,
+                        pub_inputs.randomness,
+                        sector_id.into(),
+                        challenge_index,
+                    )?;
+
+                    to_proofs.push(ProveParams{
+                        sector_id,
+                        challenged_leaf_start,
+                        rows_to_discard,
+                    })
+                }
+            }
+
+            for proof_or_fault in to_proofs
+                .into_par_iter()
+                .map(|n| {
+                    let proof = tree.gen_cached_proof(
+                        n.challenged_leaf_start as usize,
+                        Some(n.rows_to_discard),
+                    );
+                    match proof {
+                        Ok(proof) => {
+                            if proof.validate(n.challenged_leaf_start as usize)
+                                && proof.root() == priv_sector_map.get(n.sector_id).comm_r_last
+                            {
+                                Ok(ProofOrFault::Proof(proof))
+                            } else {
+                                Ok(ProofOrFault::Fault(n.sector_id))
+                            }
                         }
-                        ProofOrFault::Fault(sector_id) => {
-                            faulty_sectors.insert(sector_id);
-                        }
+                        Err(_) => Ok(ProofOrFault::Fault(n.sector_id)),
+                    }
+                })
+                .collect::<Result<Vec<_>>>()?
+            {
+                match proof_or_fault {
+                    ProofOrFault::Proof(proof) => {
+                        proofs_map.get_mut(n.sector_id).unwrap().push(proof);
+                    }
+                    ProofOrFault::Fault(n.sector_id) => {
+                        faulty_sectors.insert(n.sector_id);
                     }
                 }
+            }
 
+            for (k, v) in proofs_map{
                 proofs.push(SectorProof {
-                    inclusion_proofs,
-                    comm_c: priv_sector.comm_c,
-                    comm_r_last: priv_sector.comm_r_last,
+                    v,
+                    comm_c: priv_sector_map.get(k).comm_c,
+                    comm_r_last: priv_sector_map.get(k).comm_r_last,
                 });
             }
 
@@ -387,6 +412,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
 
             partition_proofs.push(Proof { sectors: proofs });
         }
+
         println!("dc prove_all_partitions finish");
         if faulty_sectors.is_empty() {
             Ok(partition_proofs)
