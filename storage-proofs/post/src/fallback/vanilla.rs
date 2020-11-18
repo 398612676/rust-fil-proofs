@@ -239,8 +239,8 @@ pub fn generate_leaf_challenge<T: Domain>(
     Ok(challenged_range_index)
 }
 
-enum ProofOrFault<T> {
-    Proof(T),
+enum ProofOrFault<T, E> {
+    Proof(T, E),
     Fault(SectorId),
 }
 
@@ -367,16 +367,17 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             for proof_or_fault in to_proofs
                 .into_par_iter()
                 .map(|n| {
-                    let proof = tree.gen_cached_proof(
+                    let proof = priv_sector_map.get(&n.sector_id).unwrap().tree.gen_cached_proof(
                         n.challenged_leaf_start as usize,
                         Some(n.rows_to_discard),
                     );
+
                     match proof {
                         Ok(proof) => {
                             if proof.validate(n.challenged_leaf_start as usize)
-                                && proof.root() == priv_sector_map.get(n.sector_id).comm_r_last
+                                && proof.root() == priv_sector_map.get(&n.sector_id).unwrap().comm_r_last
                             {
-                                Ok(ProofOrFault::Proof(proof))
+                                Ok(ProofOrFault::Proof(proof, n.sector_id))
                             } else {
                                 Ok(ProofOrFault::Fault(n.sector_id))
                             }
@@ -387,20 +388,20 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
                 .collect::<Result<Vec<_>>>()?
             {
                 match proof_or_fault {
-                    ProofOrFault::Proof(proof) => {
-                        proofs_map.get_mut(n.sector_id).unwrap().push(proof);
+                    ProofOrFault::Proof(proof, sector_id) => {
+                        proofs_map.get_mut(&sector_id).unwrap().push(proof);
                     }
-                    ProofOrFault::Fault(n.sector_id) => {
-                        faulty_sectors.insert(n.sector_id);
+                    ProofOrFault::Fault(sector_id) => {
+                        faulty_sectors.insert(sector_id);
                     }
                 }
             }
 
             for (k, v) in proofs_map{
                 proofs.push(SectorProof {
-                    v,
-                    comm_c: priv_sector_map.get(k).comm_c,
-                    comm_r_last: priv_sector_map.get(k).comm_r_last,
+                    inclusion_proofs: v,
+                    comm_c: priv_sector_map.get(&k).unwrap().comm_c,
+                    comm_r_last: priv_sector_map.get(&k).unwrap().comm_r_last,
                 });
             }
 
