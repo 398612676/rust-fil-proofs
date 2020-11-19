@@ -1,3 +1,4 @@
+use log::info;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -318,6 +319,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             .enumerate()
         {
             trace!("proving partition {}", j);
+            info!("loop partition {} start", j);
 
             let mut proofs = Vec::with_capacity(num_sectors_per_chunk);
 
@@ -332,6 +334,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             {
                 let tree = priv_sector.tree;
                 let sector_id = pub_sector.id;
+                info!("loop pub_sectors_chunk {} start", sector_id);
                 let tree_leafs = tree.leafs();
                 let rows_to_discard = default_rows_to_discard(tree_leafs, Tree::Arity::to_usize());
 
@@ -362,21 +365,25 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
                         rows_to_discard,
                     })
                 }
+                info!("loop pub_sectors_chunk {} end", sector_id);
             }
 
             for proof_or_fault in to_proofs
                 .into_par_iter()
                 .map(|n| {
+                    info!("loop proof {} start", n.sector_id);
                     let proof = priv_sector_map.get(&n.sector_id).unwrap().tree.gen_cached_proof(
                         n.challenged_leaf_start as usize,
                         Some(n.rows_to_discard),
                     );
+                    info!("loop proof {} end", n.sector_id);
 
                     match proof {
                         Ok(proof) => {
                             if proof.validate(n.challenged_leaf_start as usize)
                                 && proof.root() == priv_sector_map.get(&n.sector_id).unwrap().comm_r_last
                             {
+                                info!("loop proof {} return", n.sector_id);
                                 Ok(ProofOrFault::Proof(proof, n.sector_id))
                             } else {
                                 Ok(ProofOrFault::Fault(n.sector_id))
@@ -412,6 +419,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             }
 
             partition_proofs.push(Proof { sectors: proofs });
+            info!("loop partition {} end", j);
         }
 
         println!("dc prove_all_partitions finish");
