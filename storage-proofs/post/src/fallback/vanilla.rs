@@ -318,10 +318,11 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             .enumerate()
         {
             trace!("proving partition {}", j);
-            println!("loop partition {} start", j);
+            println!("huawei loop partition {} start", j);
 
             let mut proofs = Vec::with_capacity(num_sectors_per_chunk);
 
+            let mut sector_seq = Vec::new();
             let mut to_proofs = Vec::new();
             let mut proofs_map = HashMap::new();
             let mut priv_sector_map = HashMap::new();
@@ -333,7 +334,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             {
                 let tree = priv_sector.tree;
                 let sector_id = pub_sector.id;
-                println!("loop pub_sectors_chunk {} start", sector_id);
+                println!("huawei loop pub_sectors_chunk {} start", sector_id);
                 let tree_leafs = tree.leafs();
                 let rows_to_discard = default_rows_to_discard(tree_leafs, Tree::Arity::to_usize());
 
@@ -345,6 +346,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
 
                 proofs_map.insert(sector_id, Vec::new());
                 priv_sector_map.insert(sector_id, priv_sector);
+                sector_seq.push(sector_id);
 
                 for k in 0..pub_params.challenge_count
                 {
@@ -364,25 +366,25 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
                         rows_to_discard,
                     })
                 }
-                println!("loop pub_sectors_chunk {} end", sector_id);
+                println!("huawei loop pub_sectors_chunk {} end", sector_id);
             }
 
             for proof_or_fault in to_proofs
                 .into_par_iter()
                 .map(|n| {
-                    println!("loop proof {} start", n.sector_id);
+                    println!("huawei loop proof {} start", n.sector_id);
                     let proof = priv_sector_map.get(&n.sector_id).unwrap().tree.gen_cached_proof(
                         n.challenged_leaf_start as usize,
                         Some(n.rows_to_discard),
                     );
-                    println!("loop proof {} end", n.sector_id);
+                    println!("huawei loop proof {} end", n.sector_id);
 
                     match proof {
                         Ok(proof) => {
                             if proof.validate(n.challenged_leaf_start as usize)
                                 && proof.root() == priv_sector_map.get(&n.sector_id).unwrap().comm_r_last
                             {
-                                println!("loop proof {} return", n.sector_id);
+                                println!("huawei loop proof {} return", n.sector_id);
                                 Ok(ProofOrFault::Proof(proof, n.sector_id))
                             } else {
                                 Ok(ProofOrFault::Fault(n.sector_id))
@@ -403,11 +405,11 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
                 }
             }
 
-            for (k, v) in proofs_map{
+            for sector in sector_seq {
                 proofs.push(SectorProof {
-                    inclusion_proofs: v,
-                    comm_c: priv_sector_map.get(&k).unwrap().comm_c,
-                    comm_r_last: priv_sector_map.get(&k).unwrap().comm_r_last,
+                    inclusion_proofs: proofs_map.get(&sector).unwrap().to_vec(),
+                    comm_c: priv_sector_map.get(&sector).unwrap().comm_c,
+                    comm_r_last: priv_sector_map.get(&sector).unwrap().comm_r_last,
                 });
             }
 
@@ -418,7 +420,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             }
 
             partition_proofs.push(Proof { sectors: proofs });
-            println!("loop partition {} end", j);
+            println!("huawei loop partition {} end", j);
         }
 
         println!("dc prove_all_partitions finish");
