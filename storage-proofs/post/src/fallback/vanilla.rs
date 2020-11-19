@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::ensure;
 use byteorder::{ByteOrder, LittleEndian};
@@ -318,7 +319,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             .enumerate()
         {
             trace!("proving partition {}", j);
-            println!("huawei loop partition {} start", j);
+            println!("huawei loop partition start {}", SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis());
 
             let mut proofs = Vec::with_capacity(num_sectors_per_chunk);
 
@@ -327,6 +328,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             let mut proofs_map = HashMap::new();
             let mut priv_sector_map = HashMap::new();
 
+            println!("huawei loop pub_sectors_chunk start {}", SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis());
             for (i, (pub_sector, priv_sector)) in pub_sectors_chunk
                 .iter()
                 .zip(priv_sectors_chunk.iter())
@@ -334,7 +336,6 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             {
                 let tree = priv_sector.tree;
                 let sector_id = pub_sector.id;
-                println!("huawei loop pub_sectors_chunk {} start", sector_id);
                 let tree_leafs = tree.leafs();
                 let rows_to_discard = default_rows_to_discard(tree_leafs, Tree::Arity::to_usize());
 
@@ -366,13 +367,13 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
                         rows_to_discard,
                     })
                 }
-                println!("huawei loop pub_sectors_chunk {} end", sector_id);
             }
+            println!("huawei loop pub_sectors_chunk end {}", SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis());
 
+            println!("huawei loop proof start {}", SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis());
             for proof_or_fault in to_proofs
                 .into_par_iter()
                 .map(|n| {
-                    println!("huawei loop proof {} start", n.sector_id);
                     let proof = priv_sector_map.get(&n.sector_id).unwrap().tree.gen_cached_proof(
                         n.challenged_leaf_start as usize,
                         Some(n.rows_to_discard),
@@ -404,6 +405,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
                     }
                 }
             }
+            println!("huawei loop proof end {}", SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis());
 
             for sector in sector_seq {
                 proofs.push(SectorProof {
@@ -420,7 +422,7 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
             }
 
             partition_proofs.push(Proof { sectors: proofs });
-            println!("huawei loop partition {} end", j);
+            println!("huawei loop partition end {}", SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis());
         }
 
         println!("dc prove_all_partitions finish");
